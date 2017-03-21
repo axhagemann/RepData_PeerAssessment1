@@ -5,21 +5,180 @@ output:
     keep_md: true
 ---
 
+## Introduction
+
+This is the course assignment for week 2 of the Coursera course Reproducible Research. The data set at hand describes activity data. For more information see the readme in the GitHub folder. In this assignment it is the goal to read a dataset, create charts for it to visualize the data, impute missing values and finally compare activity of weekdays and weekends.
+
+The following libraries are used: stringr, plyr and lattice.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
 
 ## Loading and preprocessing the data
 
+In this section the data is loaded as is. A reconciliation is done to check the number of rows that have been loaded. Further, the date is converted from string to a date format and combined with the interval to get a datetime.
+
+```{r loading}
+library(stringr)
+library(plyr)
+# Load data set, do not do any conversions
+dataRaw <- read.csv("activity.csv", sep = ",", header = TRUE, as.is = TRUE )
+
+# check format of data
+str(dataRaw)
+
+# number of rows
+nrow(dataRaw) # 17568, ok same as in Coursera documentation
+
+# convert date (chr) and interval (int) columns datetime using strptime. Format of date appears to be YYYY-MM-DD
+# pad the interval into a HHMM format
+dataRaw$datetime <- strptime(paste(dataRaw$date,str_pad(dataRaw$interval, width=4, side="left", pad="0")), "%Y-%m-%d %H%M")
+```
 
 
 ## What is mean total number of steps taken per day?
 
+Calculate the total number of steps taken per day and show this as a histogram. Further, the mean and median number of steps taken per day should be reported.
 
+```{r NumberPerDay}
+
+# Get the total number of steps per day using a function from plyr package
+stepsDay <- ddply(dataRaw,.(date),
+      summarize,
+      averageSteps=mean(steps, na.rm=TRUE),
+      sumSteps=sum(steps),
+      medianSteps=median(steps, na.rm=TRUE)
+)
+
+# plot as histogram
+hist(stepsDay$sumSteps, xlab="Total Number of Steps per Day", main="Histogram of the total number of steps taken each day")
+
+# Report mean and median number of steps taken per day
+
+# median: previously created stepsDay result for this
+paste(stepsDay$date, stepsDay$medianSteps)
+
+# mean: previously created stepsDay result for this
+paste(stepsDay$date, stepsDay$average)
+
+
+```
 
 ## What is the average daily activity pattern?
 
+* Make a time series plot of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all days (y-axis)
+* Which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps?
 
+```{r plotMean}
+library(lattice)
+interval1 <- ddply(dataRaw,.(interval),
+      summarize,
+      meanSteps=mean(steps, na.rm = T)
+)
+
+# plot as time series
+xyplot(interval1$meanSteps ~ interval1$interval, type="l", xlab="5 Minute Interval of one Day", ylab="Average Number of Steps", main = "Average number of steps per interval")
+
+# determine the interval that contains the max average number of steps
+interval1[which.max(interval1$meanSteps),]
+# Interval 835 has the highest number of mean steps
+```
+
+Interval 835 has the highest number of mean steps
 
 ## Imputing missing values
 
+* Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NA)
+* Devise a strategy for filling in all of the missing values in the dataset. The strategy does not need to be sophisticated. For example, you could use the mean or median for that day, or the mean for that 5-minute interval, etc.
+* Create a new dataset that is equal to the original dataset but with the missing data filled in.
+* Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day. Do these values differ from the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
 
+```{r ImputingNull}
+# output the number of rows which have null values
+nrow(dataRaw[is.na(dataRaw$steps),]) 
+# 2304 rows have null values
+
+# determine the mean for a day, e.g. monday, tuesday
+head(dataRaw)
+
+# use $wday component of POSIXlt to return weekday. 
+dataRaw$day <- dataRaw$datetime$wday
+
+# subset dataRaw to only include rows that are not NA and another for rows that contain NA
+dataRawNonNull <- na.omit(dataRaw)
+dataRawNull <- dataRaw[rowSums(is.na(dataRaw)) > 0,]
+
+# use the aggregate function to calculate the mean per day of the week
+mean.day <- aggregate(dataRawNonNull$steps, by=list(dataRawNonNull$day), mean)
+
+# rename the columns
+names(mean.day) <- c("day","mean")
+
+# impute the actual NAs
+dataRawNullFixed <- merge(x = dataRawNull, y=mean.day, all.x = TRUE)
+
+# reorder the data frame to match the original
+dataRawNullFixed$steps <- dataRawNullFixed$mean
+
+# drop the means colum
+dataRawNullFixed$mean <- NULL
+
+# join the 2 dataframes to create the ouput
+
+dataProcessed <- rbind(dataRawNullFixed, dataRawNonNull)
+
+# plot a histogram for the total number of steps taken per day and report mean/median
+# first create statistics
+stepsDay2 <- ddply(dataProcessed,.(date),
+      summarize,
+      averageSteps=mean(steps, na.rm=TRUE),
+      sumSteps=sum(steps),
+      medianSteps=median(steps, na.rm=TRUE)
+)
+
+# plot as histogram
+hist(stepsDay2$sumSteps, xlab="Total Number of Steps per Day", main="Histogram of the total number of steps taken each day")
+
+# Report mean and median number of steps taken per day
+
+# Report old and new median: 
+paste(stepsDay2$date, stepsDay$medianSteps, stepsDay2$medianSteps)
+
+# Report old and new mean
+paste(stepsDay2$date, stepsDay$average, stepsDay2$average)
+
+
+```
+
+Most frequent value before imputation was 0 for every day. Due to the imputation, NULL values were changed to the average of the day and this results in a change of the median values. For the calculation of the mean there is only a change for days that previously had NULL values. 
+
+It is recommend to revise the imputation of NULL values in a real life scenario. Never the less, due to the imputation of missing values it is possible to add more detail.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r Differences}
+
+# first create a factor variable to distinguish between weekend and work days
+# the day column can be used as input for this. 0 and 6 are saturday/sunday
+
+dataProcessed$dataType <- ifelse(dataProcessed$day %in% c(0,6),"weekend","weekday")
+dataProcessed$dataType <- as.factor(dataProcessed$dataType)
+
+# check that the created variable is a factor
+str(dataProcessed)
+# ok
+
+# Aggregate the data by interval, i.e. get the average per interval
+interval <- ddply(dataProcessed,.(interval,dataType),
+      summarize,
+      meanSteps=mean(steps)
+)
+
+# create plot using lattice
+#dataProcessed$interval <- as.numeric(dataProcessed$interval)
+xyplot(interval$meanSteps ~ interval$interval|interval$dataType, type="l", layout=c(1,2), xlab="5 Minute Interval of one Day", ylab="Average Number of Steps", main = "Average number of steps per interval")
+
+
+```
+
